@@ -75,10 +75,12 @@ const defaultHandlers = [
 ];
 
 const server = setupServer(...defaultHandlers);
+const THEME_STORAGE_KEY = 'shopping-list-theme-mode';
 
 beforeAll(() => server.listen());
 beforeEach(() => {
   resetItems();
+  window.localStorage.clear();
   server.resetHandlers(...defaultHandlers);
 });
 afterEach(() => server.resetHandlers(...defaultHandlers));
@@ -94,13 +96,11 @@ describe('App', () => {
   });
 
   it('adds a new item', async () => {
-    const user = userEvent.setup();
-
     render(<App />);
 
     const input = await screen.findByLabelText('New item');
-    await user.type(input, 'Coffee');
-    await user.click(screen.getByRole('button', { name: 'Add item' }));
+    fireEvent.change(input, { target: { value: 'Coffee' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
 
     expect(await screen.findByText('Coffee')).toBeInTheDocument();
   });
@@ -120,18 +120,15 @@ describe('App', () => {
   });
 
   it('edits an existing item in place', async () => {
-    const user = userEvent.setup();
-
     render(<App />);
 
-    await user.click(await screen.findByRole('button', { name: 'Edit Milk' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Milk' }));
     const editor = screen.getByLabelText('Edit Milk');
-    await user.clear(editor);
-    await user.type(editor, 'Oat Milk');
-    await user.click(screen.getByRole('button', { name: 'Save item name' }));
+    fireEvent.change(editor, { target: { value: 'Oat Milk' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save item name' }));
 
     expect(await screen.findByText('Oat Milk')).toBeInTheDocument();
-    expect(screen.queryByText('Milk')).not.toBeInTheDocument();
+    expect(screen.queryByText('Milk', { exact: true })).not.toBeInTheDocument();
   });
 
   it('reorders items when a dragged item is dropped', async () => {
@@ -157,5 +154,76 @@ describe('App', () => {
     render(<App />);
 
     expect(await screen.findByText(/Your list is empty/i)).toBeInTheDocument();
+  });
+
+  it('shows a load error when initial fetch fails', async () => {
+    server.use(rest.get('/api/items', (req, res, ctx) => res(ctx.status(500), ctx.json({ error: 'Boom' }))));
+
+    render(<App />);
+
+    expect(await screen.findByText('Failed to load items: Boom')).toBeInTheDocument();
+  });
+
+  it('shows an add error and keeps input value when create request fails', async () => {
+    server.use(
+      rest.post('/api/items', (req, res, ctx) => res(ctx.status(500), ctx.json({ error: 'Create failed' })))
+    );
+
+    render(<App />);
+
+    const input = await screen.findByLabelText('New item');
+    fireEvent.change(input, { target: { value: 'Coffee' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Add item' }));
+
+    expect(await screen.findByText('Failed to add item: Create failed')).toBeInTheDocument();
+    expect(screen.getByLabelText('New item')).toHaveValue('Coffee');
+  });
+
+  it('cancels inline edit with Escape and keeps original value', async () => {
+    render(<App />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Edit Milk' }));
+    const editor = screen.getByLabelText('Edit Milk');
+    fireEvent.change(editor, { target: { value: 'Almond Milk' } });
+    fireEvent.keyDown(editor, { key: 'Escape' });
+
+    expect(await screen.findByText('Milk')).toBeInTheDocument();
+    expect(screen.queryByText('Almond Milk')).not.toBeInTheDocument();
+  });
+
+  it('persists theme mode to localStorage', async () => {
+    const user = userEvent.setup();
+
+    render(<App />);
+
+    const toggleModeButton = await screen.findByRole('button', { name: 'toggle color mode' });
+    await user.click(toggleModeButton);
+
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe('dark');
+  });
+
+  it('restores server order after a reorder failure', async () => {
+    server.use(
+      rest.put('/api/items/reorder', (req, res, ctx) =>
+        res(ctx.status(500), ctx.json({ error: 'Reorder failed' }))
+      )
+    );
+
+    render(<App />);
+
+    const sourceHandle = await screen.findByRole('button', { name: 'Reorder Eggs' });
+    const targetItem = screen.getByText('Milk').closest('li');
+
+    fireEvent.dragStart(sourceHandle);
+    fireEvent.dragOver(targetItem);
+    fireEvent.drop(targetItem);
+
+    expect(await screen.findByText('Failed to reorder items: Reorder failed')).toBeInTheDocument();
+
+    await waitFor(() => {
+      const listItems = screen.getAllByRole('listitem');
+      expect(listItems[0]).toHaveTextContent('Milk');
+      expect(listItems[1]).toHaveTextContent('Eggs');
+    });
   });
 });

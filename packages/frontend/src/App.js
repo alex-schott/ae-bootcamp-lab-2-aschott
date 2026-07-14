@@ -65,6 +65,12 @@ function createAppTheme(mode) {
       },
     },
     components: {
+      MuiButtonBase: {
+        defaultProps: {
+          disableRipple: true,
+          disableTouchRipple: true,
+        },
+      },
       MuiPaper: {
         styleOverrides: {
           root: {

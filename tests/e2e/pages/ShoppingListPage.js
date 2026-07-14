@@ -44,6 +44,19 @@ class ShoppingListPage {
 
     return order;
   }
+
+  async itemNames() {
+    const checkboxes = this.page.getByRole('checkbox');
+    const count = await checkboxes.count();
+    const names = [];
+
+    for (let index = 0; index < count; index += 1) {
+      const ariaLabel = await checkboxes.nth(index).getAttribute('aria-label');
+      names.push((ariaLabel || '').replace(/^Mark\s+/, '').replace(/\s+complete$/, ''));
+    }
+
+    return names;
+  }
 }
 
 module.exports = ShoppingListPage;

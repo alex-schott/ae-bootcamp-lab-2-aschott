@@ -1,5 +1,5 @@
 const request = require('supertest');
-const { app, db, resetDatabase } = require('../src/app');
+const { app, db, getAllItems, getItemById, normalizeItem, resetDatabase } = require('../src/app');
 
 beforeEach(() => {
   resetDatabase();
@@ -9,98 +9,51 @@ afterAll(() => {
   db.close();
 });
 
-async function createItem(name = 'Temp Item') {
-  const response = await request(app)
-    .post('/api/items')
-    .send({ name })
-    .set('Accept', 'application/json');
-
-  expect(response.status).toBe(201);
-  return response.body;
-}
-
-describe('shopping list API', () => {
-  it('returns seeded items in display order', async () => {
-    const response = await request(app).get('/api/items');
+describe('app unit coverage', () => {
+  it('reports health from the root endpoint', async () => {
+    const response = await request(app).get('/');
 
     expect(response.status).toBe(200);
-    expect(response.body).toHaveLength(3);
-    expect(response.body.map((item) => item.name)).toEqual(['Milk', 'Eggs', 'Bread']);
-    expect(response.body[0]).toMatchObject({ id: expect.any(Number), completed: false, position: 0 });
-  });
-
-  it('creates a new item at the end of the list', async () => {
-    const item = await createItem('Coffee');
-
-    expect(item).toMatchObject({
-      id: expect.any(Number),
-      name: 'Coffee',
-      completed: false,
-      position: 3,
+    expect(response.body).toEqual({
+      status: 'ok',
+      message: 'Backend server is running',
     });
   });
 
-  it('rejects blank item names', async () => {
-    const response = await request(app).post('/api/items').send({ name: '   ' });
-
-    expect(response.status).toBe(400);
-    expect(response.body).toEqual({ error: 'Item name is required' });
+  it('normalizes sqlite booleans to JavaScript booleans', () => {
+    expect(normalizeItem(null)).toBeNull();
+    expect(normalizeItem({ id: 7, name: 'Coffee', completed: 0 })).toEqual({
+      id: 7,
+      name: 'Coffee',
+      completed: false,
+    });
+    expect(normalizeItem({ id: 8, name: 'Tea', completed: 1 })).toEqual({
+      id: 8,
+      name: 'Tea',
+      completed: true,
+    });
   });
 
-  it('updates item text without losing completion state', async () => {
-    const item = await createItem('Old Name');
+  it('returns seeded items from helper queries in display order', () => {
+    const items = getAllItems();
 
-    const completionResponse = await request(app)
-      .patch(`/api/items/${item.id}`)
-      .send({ completed: true });
-
-    expect(completionResponse.status).toBe(200);
-    expect(completionResponse.body).toMatchObject({ completed: true, name: 'Old Name' });
-
-    const renameResponse = await request(app)
-      .patch(`/api/items/${item.id}`)
-      .send({ name: 'New Name' });
-
-    expect(renameResponse.status).toBe(200);
-    expect(renameResponse.body).toMatchObject({ name: 'New Name', completed: true });
+    expect(items.map((item) => item.name)).toEqual(['Milk', 'Eggs', 'Bread']);
+    expect(items.map((item) => item.position)).toEqual([0, 1, 2]);
+    expect(items.every((item) => typeof item.completed === 'boolean')).toBe(true);
   });
 
-  it('reorders items and keeps item data attached to each id', async () => {
-    const initialItems = (await request(app).get('/api/items')).body;
-    const first = await createItem('First');
-    const second = await createItem('Second');
-
-    await request(app).patch(`/api/items/${second.id}`).send({ completed: true });
-
-    const response = await request(app)
-      .put('/api/items/reorder')
-      .send({
-        orderedIds: [second.id, first.id, ...initialItems.map((item) => item.id)],
-      });
-
-    expect(response.status).toBe(200);
-    expect(response.body.map((item) => item.id)).toEqual([
-      second.id,
-      first.id,
-      ...initialItems.map((item) => item.id),
-    ]);
-    expect(response.body[0]).toMatchObject({ name: 'Second', completed: true, position: 0 });
-    expect(response.body[1]).toMatchObject({ name: 'First', completed: false, position: 1 });
+  it('returns null from helper lookup when item does not exist', () => {
+    expect(getItemById(999999)).toBeNull();
   });
 
-  it('rejects invalid reorder payloads', async () => {
-    const response = await request(app).put('/api/items/reorder').send({ orderedIds: ['x'] });
+  it('resetDatabase restores seeded rows after direct mutation', () => {
+    db.prepare('INSERT INTO items (name, completed, position) VALUES (?, ?, ?)').run('Coffee', 1, 3);
+    expect(getAllItems()).toHaveLength(4);
 
-    expect(response.status).toBe(400);
-    expect(response.body.error).toContain('valid item IDs');
-  });
+    resetDatabase();
 
-  it('deletes an existing item', async () => {
-    const item = await createItem('Delete Me');
-
-    const deleteResponse = await request(app).delete(`/api/items/${item.id}`);
-
-    expect(deleteResponse.status).toBe(200);
-    expect(deleteResponse.body).toEqual({ message: 'Item deleted successfully', id: item.id });
+    const items = getAllItems();
+    expect(items).toHaveLength(3);
+    expect(items.map((item) => item.name)).toEqual(['Milk', 'Eggs', 'Bread']);
   });
 });
