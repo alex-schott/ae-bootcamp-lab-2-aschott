@@ -1,126 +1,507 @@
-import React, { useState, useEffect } from 'react';
-import './App.css';
+import React, { useEffect, useMemo, useState } from 'react';
+
+import {
+  Alert,
+  AppBar,
+  Box,
+  Button,
+  Checkbox,
+  Container,
+  CssBaseline,
+  IconButton,
+  LinearProgress,
+  List,
+  Paper,
+  Stack,
+  TextField,
+  ThemeProvider,
+  Toolbar,
+  Typography,
+  createTheme,
+  alpha,
+} from '@mui/material';
+import AddIcon from '@mui/icons-material/Add';
+import Brightness4Icon from '@mui/icons-material/Brightness4';
+import Brightness7Icon from '@mui/icons-material/Brightness7';
+import CloseIcon from '@mui/icons-material/Close';
+import DragIndicatorIcon from '@mui/icons-material/DragIndicator';
+import EditIcon from '@mui/icons-material/Edit';
+import SaveIcon from '@mui/icons-material/Save';
+
+const THEME_STORAGE_KEY = 'shopping-list-theme-mode';
+
+function createAppTheme(mode) {
+  const isDarkMode = mode === 'dark';
+
+  return createTheme({
+    palette: {
+      mode,
+      primary: {
+        main: isDarkMode ? '#5eead4' : '#115e59',
+      },
+      secondary: {
+        main: isDarkMode ? '#f59e0b' : '#c2410c',
+      },
+      background: {
+        default: isDarkMode ? '#081017' : '#f7f6f2',
+        paper: isDarkMode ? '#0f172a' : '#ffffff',
+      },
+    },
+    shape: {
+      borderRadius: 18,
+    },
+    typography: {
+      fontFamily: '"Avenir Next", "Trebuchet MS", "Segoe UI", sans-serif',
+      h4: {
+        fontWeight: 800,
+        letterSpacing: '-0.04em',
+      },
+      h6: {
+        fontWeight: 700,
+      },
+      button: {
+        textTransform: 'none',
+        fontWeight: 700,
+      },
+    },
+    components: {
+      MuiPaper: {
+        styleOverrides: {
+          root: {
+            backgroundImage: 'none',
+          },
+        },
+      },
+    },
+  });
+}
+
+function moveItem(items, sourceId, destinationId) {
+  const sourceIndex = items.findIndex((item) => item.id === sourceId);
+  const destinationIndex = items.findIndex((item) => item.id === destinationId);
+
+  if (sourceIndex === -1 || destinationIndex === -1 || sourceIndex === destinationIndex) {
+    return items;
+  }
+
+  const nextItems = [...items];
+  const [movedItem] = nextItems.splice(sourceIndex, 1);
+  nextItems.splice(destinationIndex, 0, movedItem);
+
+  return nextItems.map((item, position) => ({
+    ...item,
+    position,
+  }));
+}
+
+function requestJson(path, options = {}) {
+  return fetch(path, {
+    headers: {
+      'Content-Type': 'application/json',
+      ...(options.headers || {}),
+    },
+    ...options,
+  }).then(async (response) => {
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(payload?.error || 'Request failed');
+    }
+
+    return payload;
+  });
+}
+
+function ItemRow({
+  item,
+  isDragging,
+  isDropTarget,
+  isEditing,
+  editValue,
+  onEditValueChange,
+  onToggle,
+  onBeginEdit,
+  onSaveEdit,
+  onCancelEdit,
+  onDragStart,
+  onDragOver,
+  onDrop,
+  onDragEnd,
+}) {
+  return (
+    <Paper
+      component="li"
+      elevation={0}
+      draggable={!isEditing}
+      onDragStart={() => onDragStart(item.id)}
+      onDragOver={(event) => {
+        event.preventDefault();
+        onDragOver(item.id);
+      }}
+      onDrop={() => onDrop(item.id)}
+      onDragEnd={onDragEnd}
+      sx={{
+        border: 1,
+        borderColor: isDropTarget
+          ? 'primary.main'
+          : isDragging
+            ? 'secondary.main'
+            : 'divider',
+        boxShadow: isDragging ? 6 : 0,
+        opacity: isDragging ? 0.85 : 1,
+        transition: 'border-color 160ms ease, box-shadow 160ms ease, opacity 160ms ease',
+      }}
+    >
+      <Stack direction="row" alignItems="center" spacing={1} sx={{ px: 1, py: 1 }}>
+        <IconButton
+          aria-label={`Reorder ${item.name}`}
+          size="small"
+          onDragStart={() => onDragStart(item.id)}
+          sx={{ cursor: 'grab', color: 'text.secondary' }}
+        >
+          <DragIndicatorIcon />
+        </IconButton>
+        <Checkbox
+          checked={item.completed}
+          onChange={(event) => onToggle(item.id, event.target.checked)}
+          inputProps={{ 'aria-label': `Mark ${item.name} complete` }}
+        />
+        <Box sx={{ flexGrow: 1, minWidth: 0 }}>
+          {isEditing ? (
+            <TextField
+              autoFocus
+              fullWidth
+              size="small"
+              value={editValue}
+              onChange={(event) => onEditValueChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  onSaveEdit(item.id);
+                }
+
+                if (event.key === 'Escape') {
+                  event.preventDefault();
+                  onCancelEdit();
+                }
+              }}
+              inputProps={{
+                'aria-label': `Edit ${item.name}`,
+              }}
+            />
+          ) : (
+            <Typography
+              variant="body1"
+              sx={{
+                textDecoration: item.completed ? 'line-through' : 'none',
+                opacity: item.completed ? 0.55 : 1,
+                fontWeight: 600,
+                wordBreak: 'break-word',
+              }}
+            >
+              {item.name}
+            </Typography>
+          )}
+        </Box>
+        {isEditing ? (
+          <Stack direction="row" spacing={0.5}>
+            <IconButton aria-label="Save item name" onClick={() => onSaveEdit(item.id)}>
+              <SaveIcon />
+            </IconButton>
+            <IconButton aria-label="Cancel edit" onClick={onCancelEdit}>
+              <CloseIcon />
+            </IconButton>
+          </Stack>
+        ) : (
+          <IconButton aria-label={`Edit ${item.name}`} onClick={() => onBeginEdit(item)}>
+            <EditIcon />
+          </IconButton>
+        )}
+      </Stack>
+    </Paper>
+  );
+}
+
+function EmptyState() {
+  return (
+    <Box
+      sx={{
+        py: 6,
+        px: 3,
+        textAlign: 'center',
+        color: 'text.secondary',
+      }}
+    >
+      <Typography variant="h6" gutterBottom>
+        Your list is empty
+      </Typography>
+      <Typography variant="body2">Add an item above to start building your shopping list.</Typography>
+    </Box>
+  );
+}
 
 function App() {
-  const [data, setData] = useState([]);
+  const [mode, setMode] = useState(() => {
+    if (typeof window === 'undefined') {
+      return 'light';
+    }
+
+    return window.localStorage.getItem(THEME_STORAGE_KEY) || 'light';
+  });
+  const [items, setItems] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
-  const [newItem, setNewItem] = useState('');
+  const [error, setError] = useState('');
+  const [newItemName, setNewItemName] = useState('');
+  const [editingItemId, setEditingItemId] = useState(null);
+  const [editingValue, setEditingValue] = useState('');
+  const [draggedItemId, setDraggedItemId] = useState(null);
+  const [dropTargetId, setDropTargetId] = useState(null);
+
+  const theme = useMemo(() => createAppTheme(mode), [mode]);
 
   useEffect(() => {
-    fetchData();
+    window.localStorage.setItem(THEME_STORAGE_KEY, mode);
+  }, [mode]);
+
+  useEffect(() => {
+    let isActive = true;
+
+    async function loadItems() {
+      try {
+        setLoading(true);
+        const response = await requestJson('/api/items');
+
+        if (isActive) {
+          setItems(response);
+          setError('');
+        }
+      } catch (loadError) {
+        if (isActive) {
+          setError(`Failed to load items: ${loadError.message}`);
+        }
+      } finally {
+        if (isActive) {
+          setLoading(false);
+        }
+      }
+    }
+
+    loadItems();
+
+    return () => {
+      isActive = false;
+    };
   }, []);
 
-  const fetchData = async () => {
-    try {
-      setLoading(true);
-      const response = await fetch('/api/items');
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
-      }
-      const result = await response.json();
-      setData(result);
-      setError(null);
-    } catch (err) {
-      setError('Failed to fetch data: ' + err.message);
-      console.error('Error fetching data:', err);
-    } finally {
-      setLoading(false);
+  async function handleAddItem(event) {
+    event.preventDefault();
+
+    const trimmedName = newItemName.trim();
+
+    if (!trimmedName) {
+      return;
     }
-  };
-
-  const handleSubmit = async (e) => {
-    e.preventDefault();
-    if (!newItem.trim()) return;
 
     try {
-      const response = await fetch('/api/items', {
+      const createdItem = await requestJson('/api/items', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ name: newItem }),
+        body: JSON.stringify({ name: trimmedName }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to add item');
-      }
-
-      const result = await response.json();
-      setData([...data, result]);
-      setNewItem('');
-    } catch (err) {
-      setError('Error adding item: ' + err.message);
-      console.error('Error adding item:', err);
+      setItems((currentItems) => [...currentItems, createdItem]);
+      setNewItemName('');
+      setError('');
+    } catch (addError) {
+      setError(`Failed to add item: ${addError.message}`);
     }
-  };
+  }
 
-  const handleDelete = async (itemId) => {
+  async function handleToggleItem(id, completed) {
     try {
-      const response = await fetch(`/api/items/${itemId}`, {
-        method: 'DELETE',
+      const updatedItem = await requestJson(`/api/items/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ completed }),
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to delete item');
-      }
-
-      setData(data.filter(item => item.id !== itemId));
-      setError(null);
-    } catch (err) {
-      setError('Error deleting item: ' + err.message);
-      console.error('Error deleting item:', err);
+      setItems((currentItems) =>
+        currentItems.map((item) => (item.id === id ? updatedItem : item))
+      );
+      setError('');
+    } catch (toggleError) {
+      setError(`Failed to update item: ${toggleError.message}`);
     }
-  };
+  }
+
+  function handleBeginEdit(item) {
+    setEditingItemId(item.id);
+    setEditingValue(item.name);
+  }
+
+  function handleCancelEdit() {
+    setEditingItemId(null);
+    setEditingValue('');
+  }
+
+  async function handleSaveEdit(id) {
+    const trimmedValue = editingValue.trim();
+
+    if (!trimmedValue) {
+      return;
+    }
+
+    try {
+      const updatedItem = await requestJson(`/api/items/${id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: trimmedValue }),
+      });
+
+      setItems((currentItems) =>
+        currentItems.map((item) => (item.id === id ? updatedItem : item))
+      );
+      handleCancelEdit();
+      setError('');
+    } catch (saveError) {
+      setError(`Failed to save item: ${saveError.message}`);
+    }
+  }
+
+  async function handleReorderItem(targetId) {
+    if (draggedItemId === null || draggedItemId === targetId) {
+      return;
+    }
+
+    const nextItems = moveItem(items, draggedItemId, targetId);
+
+    if (nextItems === items) {
+      return;
+    }
+
+    const orderedIds = nextItems.map((item) => item.id);
+    setItems(nextItems);
+    setDraggedItemId(null);
+    setDropTargetId(null);
+
+    try {
+      await requestJson('/api/items/reorder', {
+        method: 'PUT',
+        body: JSON.stringify({ orderedIds }),
+      });
+
+      setError('');
+    } catch (reorderError) {
+      setError(`Failed to reorder items: ${reorderError.message}`);
+      const refreshedItems = await requestJson('/api/items');
+      setItems(refreshedItems);
+    }
+  }
 
   return (
-    <div className="App">
-      <header className="App-header">
-        <h1>To Do App</h1>
-        <p>Keep track of your tasks</p>
-      </header>
+    <ThemeProvider theme={theme}>
+      <CssBaseline />
+      <Box
+        sx={{
+          minHeight: '100vh',
+          background: (muiTheme) =>
+            `radial-gradient(circle at top, ${alpha(muiTheme.palette.primary.main, 0.18)}, transparent 40%), linear-gradient(180deg, ${muiTheme.palette.background.default} 0%, ${alpha(muiTheme.palette.primary.main, 0.04)} 100%)`,
+        }}
+      >
+        <AppBar position="sticky" elevation={0} color="transparent" sx={{ backdropFilter: 'blur(14px)' }}>
+          <Toolbar>
+            <Box sx={{ flexGrow: 1 }}>
+              <Typography variant="h6" component="div">
+                Shopping List
+              </Typography>
+              <Typography variant="body2" color="text.secondary">
+                Track, edit, and reorder what you need next.
+              </Typography>
+            </Box>
+            <IconButton
+              color="inherit"
+              aria-label="toggle color mode"
+              onClick={() => setMode((currentMode) => (currentMode === 'light' ? 'dark' : 'light'))}
+            >
+              {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
+            </IconButton>
+          </Toolbar>
+          {loading ? <LinearProgress /> : null}
+        </AppBar>
 
-      <main>
-        <section className="add-item-section">
-          <h2>Add New Item</h2>
-          <form onSubmit={handleSubmit}>
-            <input
-              type="text"
-              value={newItem}
-              onChange={(e) => setNewItem(e.target.value)}
-              placeholder="Enter item name"
-            />
-            <button type="submit">Add Item</button>
-          </form>
-        </section>
+        <Container maxWidth="sm" sx={{ py: 4 }}>
+          <Stack spacing={3}>
+            <Paper elevation={0} sx={{ p: 3, border: 1, borderColor: 'divider' }}>
+              <Stack component="form" spacing={2} onSubmit={handleAddItem}>
+                <Box>
+                  <Typography variant="h4" component="h1" gutterBottom>
+                    Build your list
+                  </Typography>
+                  <Typography variant="body2" color="text.secondary">
+                    Add groceries, household supplies, or whatever you need next.
+                  </Typography>
+                </Box>
+                <Stack direction={{ xs: 'column', sm: 'row' }} spacing={1.5}>
+                  <TextField
+                    fullWidth
+                    label="New item"
+                    placeholder="Add milk, apples, or coffee"
+                    value={newItemName}
+                    onChange={(event) => setNewItemName(event.target.value)}
+                  />
+                  <Button
+                    type="submit"
+                    variant="contained"
+                    startIcon={<AddIcon />}
+                    disabled={!newItemName.trim()}
+                    sx={{ minWidth: { sm: 140 } }}
+                  >
+                    Add item
+                  </Button>
+                </Stack>
+              </Stack>
+            </Paper>
 
-        <section className="items-section">
-          <h2>Items from Database</h2>
-          {loading && <p>Loading data...</p>}
-          {error && <p className="error">{error}</p>}
-          {!loading && !error && (
-            <ul>
-              {data.length > 0 ? (
-                data.map((item) => (
-                  <li key={item.id}>
-                    <span>{item.name}</span>
-                    <button 
-                      onClick={() => handleDelete(item.id)}
-                      className="delete-btn"
-                      type="button"
-                    >
-                      Delete
-                    </button>
-                  </li>
-                ))
+            {error ? <Alert severity="error">{error}</Alert> : null}
+
+            <Paper elevation={0} sx={{ p: 2, border: 1, borderColor: 'divider' }}>
+              <Stack direction="row" justifyContent="space-between" alignItems="baseline" sx={{ px: 1, pb: 1 }}>
+                <Typography variant="h6">Items</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  {items.length} item{items.length === 1 ? '' : 's'}
+                </Typography>
+              </Stack>
+
+              {items.length === 0 && !loading ? (
+                <EmptyState />
               ) : (
-                <p>No items found. Add some!</p>
+                <List component="ul" disablePadding sx={{ display: 'grid', gap: 1.25 }}>
+                  {items.map((item) => (
+                    <ItemRow
+                      key={item.id}
+                      item={item}
+                      isDragging={draggedItemId === item.id}
+                      isDropTarget={dropTargetId === item.id}
+                      isEditing={editingItemId === item.id}
+                      editValue={editingValue}
+                      onEditValueChange={setEditingValue}
+                      onToggle={handleToggleItem}
+                      onBeginEdit={handleBeginEdit}
+                      onSaveEdit={handleSaveEdit}
+                      onCancelEdit={handleCancelEdit}
+                      onDragStart={(id) => setDraggedItemId(id)}
+                      onDragOver={(id) => setDropTargetId(id)}
+                      onDrop={handleReorderItem}
+                      onDragEnd={() => {
+                        setDraggedItemId(null);
+                        setDropTargetId(null);
+                      }}
+                    />
+                  ))}
+                </List>
               )}
-            </ul>
-          )}
-        </section>
-      </main>
-    </div>
+            </Paper>
+          </Stack>
+        </Container>
+      </Box>
+    </ThemeProvider>
   );
 }
 
