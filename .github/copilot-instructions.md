@@ -12,3 +12,4 @@ The project documentation will be built during the bootcamp sessions.
 - [Functional Requirements](../docs/functional-requirements.md) - Core shopping list app behavior and interactions
 - [UI Guidelines](../docs/ui-guidelines.md) - Component library, theming, light/dark mode, and styling conventions
 - [Testing Guidelines](../docs/testing-guidelines.md) - Test types, frameworks, file conventions, and general testing principles
+- [Coding Guidelines](../docs/coding-guidelines.md) - Formatting, naming conventions, linting, and code quality principles
